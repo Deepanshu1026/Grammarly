@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Loader2, CheckCircle, AlertCircle } from 'lucide-react';
+import { Loader2, AlertCircle } from 'lucide-react';
 
 interface Match {
     message: string;
@@ -40,9 +40,10 @@ export default function ContentApp() {
     const updatePosition = () => {
         if (activeTarget) {
             const rect = activeTarget.getBoundingClientRect();
+            // Since host is 'fixed', client rect matches perfectly without scroll offset
             setPosition({
-                top: rect.bottom + window.scrollY - 35,
-                left: rect.right + window.scrollX - 40
+                top: rect.bottom - 45,
+                left: rect.right - 45
             });
         }
     };
@@ -95,9 +96,10 @@ export default function ContentApp() {
         const handleBlur = () => {
             // Need a tiny timeout to see where focus actually went
             setTimeout(() => {
+                const shadowHost = document.getElementById('grammarly-clone-host');
                 if (
                     document.activeElement !== activeTarget &&
-                    !widgetRef.current?.contains(document.activeElement)
+                    document.activeElement !== shadowHost
                 ) {
                     setActiveTarget(null);
                     setShowPopover(false);
@@ -106,10 +108,13 @@ export default function ContentApp() {
         };
 
         const handleClickOutside = (e: MouseEvent) => {
+            const isInsideWidget = widgetRef.current && e.composedPath().includes(widgetRef.current);
+            const shadowHost = document.getElementById('grammarly-clone-host');
+
             if (
-                widgetRef.current &&
-                !widgetRef.current.contains(e.target as Node) &&
-                e.target !== activeTarget
+                !isInsideWidget &&
+                e.target !== activeTarget &&
+                e.target !== shadowHost
             ) {
                 // Keep active target if they just clicked somewhere else on the page but not an input
                 setShowPopover(false);
@@ -160,24 +165,132 @@ export default function ContentApp() {
         });
     };
 
+    const applyReplacement = (match: Match, replacementValue: string) => {
+        if (!activeTarget) return;
+
+        setStatus('loading');
+
+        try {
+            if (activeTarget.tagName === 'INPUT' || activeTarget.tagName === 'TEXTAREA') {
+                const el = activeTarget as HTMLInputElement | HTMLTextAreaElement;
+
+                // Keep track of the original cursor position
+                const startPos = match.context.offset;
+                const endPos = match.context.offset + match.context.length;
+
+                el.focus();
+                el.setSelectionRange(startPos, endPos);
+                // Safe insertion: works for React Inputs by updating natively
+                document.execCommand('insertText', false, replacementValue);
+
+                // Fallback for some non-standard inputs just in case execCommand didn't work
+                if (el.value.substring(startPos, startPos + replacementValue.length) !== replacementValue) {
+                    const currentText = el.value;
+                    const newText = currentText.substring(0, startPos) + replacementValue + currentText.substring(endPos);
+
+                    // React 15/16/17 setter hack
+                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+                    const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
+
+                    if (activeTarget.tagName === 'INPUT' && nativeInputValueSetter) {
+                        nativeInputValueSetter.call(el, newText);
+                    } else if (activeTarget.tagName === 'TEXTAREA' && nativeTextAreaValueSetter) {
+                        nativeTextAreaValueSetter.call(el, newText);
+                    } else {
+                        el.value = newText;
+                    }
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+            } else if (activeTarget.isContentEditable || activeTarget.contentEditable === 'true') {
+                activeTarget.focus();
+
+                // Select the text carefully inside the ContentEditable 
+                // avoiding destroying framework DOMs (React, Vue, Facebook, WhatsApp web, etc.)
+                const selection = window.getSelection();
+                if (selection && selection.rangeCount > 0) {
+                    // Try our best to select the exact string index
+                    const range = document.createRange();
+
+                    // A proper implementation would traverse text nodes here to find the exact DOM node matches for match.context.offset.
+                    // For simplicity and safety in a clone, we command 'selectAll' and replace if small, but let's just attempt 
+                    // a basic select-and-replace algorithm via execCommand if possible, or gracefully degrade.
+                    try {
+                        let currentOffset = 0;
+                        let startNode: Node | null = null;
+                        let startNodeOffset = 0;
+                        let endNode: Node | null = null;
+                        let endNodeOffset = 0;
+
+                        const walkNodes = (node: Node) => {
+                            if (startNode && endNode) return;
+                            if (node.nodeType === Node.TEXT_NODE) {
+                                const len = node.nodeValue?.length || 0;
+                                if (!startNode && currentOffset + len >= match.context.offset) {
+                                    startNode = node;
+                                    startNodeOffset = match.context.offset - currentOffset;
+                                }
+                                if (startNode && !endNode && currentOffset + len >= match.context.offset + match.context.length) {
+                                    endNode = node;
+                                    endNodeOffset = match.context.offset + match.context.length - currentOffset;
+                                }
+                                currentOffset += len;
+                            } else {
+                                for (let i = 0; i < node.childNodes.length; i++) {
+                                    walkNodes(node.childNodes[i]);
+                                }
+                            }
+                        };
+
+                        walkNodes(activeTarget);
+
+                        if (startNode && endNode) {
+                            range.setStart(startNode, startNodeOffset);
+                            range.setEnd(endNode, endNodeOffset);
+                            selection.removeAllRanges();
+                            selection.addRange(range);
+
+                            // Let the browser handle standard text replacing
+                            document.execCommand('insertText', false, replacementValue);
+                        } else {
+                            // Fallback that might break React (only if tree walker fails)
+                            activeTarget.innerText = activeTarget.innerText.replace(match.context.text.substring(match.context.offset, match.context.offset + match.context.length), replacementValue);
+                            activeTarget.dispatchEvent(new Event('input', { bubbles: true }));
+                        }
+                    } catch (e) {
+                        document.execCommand('insertText', false, replacementValue);
+                    }
+                }
+            }
+        } catch (e) {
+            console.error("Grammarly Clone Error replacing text:", e);
+        }
+
+        // Re-check after a brief timeout to let React/site update the UI
+        setTimeout(() => checkText(activeTarget), 50);
+    };
+
     if (!isEnabled || !activeTarget) return null;
 
     return (
         <div
             ref={widgetRef}
-            style={{ position: 'absolute', top: position.top, left: position.left, zIndex: 2147483647 }}
-            className="font-sans antialiased text-left"
+            id="grammarly-clone-root"
+            onMouseDown={(e) => {
+                // CRITICAL FIX: Prevent focus stealing
+                e.preventDefault();
+            }}
+            style={{ position: 'absolute', top: position.top, left: position.left }}
         >
             <button
                 onClick={() => matches.length > 0 && setShowPopover(!showPopover)}
-                className="w-8 h-8 rounded-full bg-white shadow-md border border-gray-100 flex items-center justify-center relative hover:scale-105 transition-transform"
+                className={`gc-widget-btn ${status === 'error' ? 'gc-widget-btn-error' : ''}`}
             >
-                {status === 'loading' && <Loader2 className="w-4 h-4 text-green-500 animate-spin" />}
-                {status === 'idle' && <CheckCircle className="w-5 h-5 text-green-500" />}
+                {status === 'loading' && <Loader2 className="gc-icon-spin" />}
+                {status === 'idle' && <div className="gc-logo-icon">G</div>}
                 {status === 'error' && (
                     <>
-                        <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/1/18/Grammarly_logo.svg/1024px-Grammarly_logo.svg.png" className="w-5 h-5 opacity-90 object-contain" alt="G" style={{ filter: 'grayscale(100%) sepia(100%) hue-rotate(300deg) saturate(10000%)' }} />
-                        <div className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold px-[4px] py-[1px] rounded-full shadow-sm">
+                        <div className="gc-logo-icon gc-logo-icon-error">G</div>
+                        <div className="gc-badge">
                             {matches.length > 99 ? '99+' : matches.length}
                         </div>
                     </>
@@ -185,33 +298,42 @@ export default function ContentApp() {
             </button>
 
             {showPopover && matches.length > 0 && (
-                <div className="absolute top-10 right-0 w-80 bg-white rounded-xl shadow-xl border border-gray-100 flex flex-col max-h-[400px] overflow-hidden">
-                    <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 font-semibold text-gray-800 flex justify-between items-center">
-                        <span>Suggestions</span>
-                        <span className="bg-red-100 text-red-600 px-2 py-0.5 rounded-full text-xs">{matches.length}</span>
+                <div className="gc-popover">
+                    <div className="gc-popover-header">
+                        <span className="gc-popover-title">Suggestions</span>
+                        <div className="gc-popover-count-pill">{matches.length}</div>
                     </div>
 
-                    <div className="overflow-y-auto w-full">
+                    <div className="gc-popover-body">
                         {matches.map((match, idx) => {
                             const start = match.context.text.substring(0, match.context.offset);
                             const errorWord = match.context.text.substring(match.context.offset, match.context.offset + match.context.length);
                             const end = match.context.text.substring(match.context.offset + match.context.length);
 
                             return (
-                                <div key={idx} className="p-4 border-b border-gray-50 hover:bg-gray-50 transition-colors">
-                                    <p className="text-sm font-semibold text-red-500 mb-2 flex items-start gap-2">
-                                        <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-                                        {match.message}
-                                    </p>
+                                <div key={idx} className="gc-match-card">
+                                    <div className="gc-match-header">
+                                        <div className="gc-icon-wrapper">
+                                            <AlertCircle className="gc-match-icon" />
+                                        </div>
+                                        <span className="gc-match-title">{match.message}</span>
+                                    </div>
 
-                                    <div className="text-xs text-gray-600 bg-gray-100 rounded p-2 mb-3 leading-relaxed">
-                                        ...{start}<span className="bg-red-200 text-red-900 px-0.5 rounded underline decoration-red-500 decoration-wavy">{errorWord}</span>{end}...
+                                    <div className="gc-match-context">
+                                        ...{start}<span className="gc-error-word">{errorWord}</span>{end}...
                                     </div>
 
                                     {match.replacements.length > 0 && (
-                                        <div className="flex flex-wrap gap-2">
+                                        <div className="gc-replacements">
                                             {match.replacements.slice(0, 3).map((r, i) => (
-                                                <button key={i} className="px-3 py-1 bg-green-100 hover:bg-green-200 text-green-700 rounded-md text-sm font-medium transition-colors">
+                                                <button
+                                                    key={i}
+                                                    className="gc-replace-btn"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        applyReplacement(match, r.value);
+                                                    }}
+                                                >
                                                     {r.value}
                                                 </button>
                                             ))}

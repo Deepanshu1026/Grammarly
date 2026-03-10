@@ -18,9 +18,6 @@
                 "<all_urls>"
             ],
             "all_frames": true,
-            "css": [
-                "assets/content.css"
-            ],
             "js": [
                 "assets/content.js"
             ]

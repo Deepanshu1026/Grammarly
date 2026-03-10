@@ -14,9 +14,9 @@ export default defineConfig({
         emptyOutDir: buildTarget === undefined,
         rollupOptions: buildTarget === 'content'
             ? {
-                input: resolve(__dirname, 'src/content/index.tsx'),
+                input: { content: resolve(__dirname, 'src/content/index.tsx') },
                 output: {
-                    format: 'iife',
+                    format: 'es',
                     entryFileNames: 'assets/content.js',
                     inlineDynamicImports: true,
                     assetFileNames: 'assets/[name].[ext]',

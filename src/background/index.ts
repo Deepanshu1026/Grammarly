@@ -2,7 +2,14 @@
 
 chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     if (request.action === 'checkGrammar') {
-        const text = request.text;
+        let text = request.text;
+
+        // Safety Limit: Prevent checking text inputs larger than 5,000 characters
+        // to avoid crashing the extension or getting IP-banned by LanguageTool API limits.
+        if (text && text.length > 5000) {
+            text = text.substring(0, 5000); // Truncate to safety limit
+        }
+
         const url = 'https://api.languagetool.org/v2/check';
 
         fetch(url, {
