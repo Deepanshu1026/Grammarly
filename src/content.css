@@ -1,0 +1,19 @@
+@tailwind components;
+@tailwind utilities;
+
+/* 
+ * We explicitly do NOT use @tailwind base here! 
+ * Using base resets the styling of the ENTIRE host website (e.g., margins, headings, links),
+ * which is terrible for a Chrome extension injected into random pages.
+ */
+
+#grammarly-clone-root {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 2147483647;
+}
+
+#grammarly-clone-root * {
+    box-sizing: border-box;
+}

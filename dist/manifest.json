@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Grammarly Clone",
+  "version": "1.0",
+  "description": "A grammar and spelling checker extension built with React.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://api.languagetool.org/*"
+  ],
+  "background": {
+    "service_worker": "assets/background.js"
+  },
+    "content_scripts": [
+        {
+            "matches": [
+                "<all_urls>"
+            ],
+            "all_frames": true,
+            "css": [
+                "assets/content.css"
+            ],
+            "js": [
+                "assets/content.js"
+            ]
+        }
+    ],
+  "action": {
+    "default_popup": "src/popup/index.html",
+    "default_title": "Grammar Checker"
+  }
+}
