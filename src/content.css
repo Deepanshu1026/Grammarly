@@ -274,6 +274,15 @@
     transform: scale(.96);
 }
 
+.gc-replace-sentence-btn {
+    background: #605dec;
+}
+
+.gc-replace-sentence-btn:hover {
+    background: #4743c7;
+    box-shadow: 0 4px 10px rgba(96, 93, 236, .35);
+}
+
 /* --------------------------------
    SPINNER
 --------------------------------*/

@@ -3,7 +3,12 @@ import { Loader2, AlertCircle } from 'lucide-react';
 
 interface Match {
     message: string;
+    offset: number;
+    length: number;
     context: { text: string; offset: number; length: number };
+    sentenceOffset?: number;
+    sentenceLength?: number;
+    sentenceRewrite?: string;
     replacements: { value: string }[];
 }
 
@@ -90,6 +95,7 @@ export default function ContentApp() {
             if (isEligibleInput(target)) {
                 setActiveTarget(target);
                 setTimeout(() => updatePosition(), 10);
+                setShowPopover(true);
                 checkText(target);
             }
         };
@@ -125,7 +131,9 @@ export default function ContentApp() {
             const isInsideWidget = widgetRef.current && e.composedPath().includes(widgetRef.current);
             const shadowHost = document.getElementById('grammarly-clone-host');
 
-            if (
+            if (e.target === activeTarget) {
+                setShowPopover(true);
+            } else if (
                 !isInsideWidget &&
                 e.target !== activeTarget &&
                 e.target !== shadowHost
@@ -180,7 +188,9 @@ export default function ContentApp() {
                 if (response && response.success) {
                     const resultMatches = response.data?.matches || [];
                     setMatches(resultMatches);
-                    setStatus(resultMatches.length > 0 ? 'error' : 'idle');
+                    const hasErrors = resultMatches.length > 0;
+                    setStatus(hasErrors ? 'error' : 'idle');
+                    if (hasErrors) setShowPopover(true);
                 } else {
                     setStatus('idle');
                 }
@@ -191,7 +201,7 @@ export default function ContentApp() {
         }
     };
 
-    const applyReplacement = (match: Match, replacementValue: string) => {
+    const applyReplacement = (startPos: number, endPos: number, replacementValue: string) => {
         if (!activeTarget) return;
 
         setStatus('loading');
@@ -199,10 +209,6 @@ export default function ContentApp() {
         try {
             if (activeTarget.tagName === 'INPUT' || activeTarget.tagName === 'TEXTAREA') {
                 const el = activeTarget as HTMLInputElement | HTMLTextAreaElement;
-
-                // Keep track of the original cursor position
-                const startPos = match.context.offset;
-                const endPos = match.context.offset + match.context.length;
 
                 el.focus();
                 el.setSelectionRange(startPos, endPos);
@@ -251,13 +257,13 @@ export default function ContentApp() {
                             if (startNode && endNode) return;
                             if (node.nodeType === Node.TEXT_NODE) {
                                 const len = node.nodeValue?.length || 0;
-                                if (!startNode && currentOffset + len >= match.context.offset) {
+                                if (!startNode && currentOffset + len >= startPos) {
                                     startNode = node;
-                                    startNodeOffset = match.context.offset - currentOffset;
+                                    startNodeOffset = startPos - currentOffset;
                                 }
-                                if (startNode && !endNode && currentOffset + len >= match.context.offset + match.context.length) {
+                                if (startNode && !endNode && currentOffset + len >= endPos) {
                                     endNode = node;
-                                    endNodeOffset = match.context.offset + match.context.length - currentOffset;
+                                    endNodeOffset = endPos - currentOffset;
                                 }
                                 currentOffset += len;
                             } else {
@@ -279,7 +285,8 @@ export default function ContentApp() {
                             document.execCommand('insertText', false, replacementValue);
                         } else {
                             // Fallback that might break React (only if tree walker fails)
-                            activeTarget.innerText = activeTarget.innerText.replace(match.context.text.substring(match.context.offset, match.context.offset + match.context.length), replacementValue);
+                            const currentInner = activeTarget.innerText;
+                            activeTarget.innerText = currentInner.substring(0, startPos) + replacementValue + currentInner.substring(endPos);
                             activeTarget.dispatchEvent(new Event('input', { bubbles: true }));
                         }
                     } catch (e) {
@@ -389,22 +396,36 @@ export default function ContentApp() {
                                         ...{start}<span className="gc-error-word">{errorWord}</span>{end}...
                                     </div>
 
-                                    {match.replacements.length > 0 && (
-                                        <div className="gc-replacements">
-                                            {match.replacements.slice(0, 3).map((r, i) => (
-                                                <button
-                                                    key={i}
-                                                    className="gc-replace-btn"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        applyReplacement(match, r.value);
-                                                    }}
-                                                >
-                                                    {r.value}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
+                                    <div className="gc-replacements">
+                                        {match.replacements.length > 0 && match.replacements.slice(0, 1).map((r, i) => (
+                                            <button
+                                                key={`word-${i}`}
+                                                className="gc-replace-btn"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    applyReplacement(match.offset, match.offset + match.length, r.value);
+                                                }}
+                                            >
+                                                Fix Word: {r.value}
+                                            </button>
+                                        ))}
+
+                                        {match.sentenceRewrite && (
+                                            <button
+                                                className="gc-replace-btn gc-replace-sentence-btn"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    applyReplacement(
+                                                        match.sentenceOffset ?? 0,
+                                                        (match.sentenceOffset ?? 0) + (match.sentenceLength ?? 0),
+                                                        match.sentenceRewrite!
+                                                    );
+                                                }}
+                                            >
+                                                Rewrite Sentence
+                                            </button>
+                                        )}
+                                    </div>
                                 </div>
                             );
                         })}
