@@ -352,7 +352,7 @@ export default function ContentApp() {
                 {status === 'error' && (
                     <>
                         <img
-                            src={chrome.runtime.getURL("logo/Grammerly logo.png")}
+                            src={chrome.runtime.getURL("logo/logo.png")}
                             alt="Grammarly Clone Error"
                             className="gc-logo-img"
                         />
