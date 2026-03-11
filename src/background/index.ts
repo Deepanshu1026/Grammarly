@@ -19,7 +19,12 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
             },
             body: `text=${encodeURIComponent(text)}&language=en-US`
         })
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                return response.json();
+            })
             .then(data => {
                 sendResponse({ success: true, data: data });
             })

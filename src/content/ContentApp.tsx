@@ -19,10 +19,6 @@ export default function ContentApp() {
     const widgetRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        chrome.storage?.sync?.get(['enabled'], (result) => {
-            if (result.enabled !== undefined) setIsEnabled(result.enabled);
-        });
-
         const handleStorageChange = (changes: any, namespace: string) => {
             if (namespace === 'sync' && changes.enabled) {
                 setIsEnabled(changes.enabled.newValue);
@@ -33,8 +29,26 @@ export default function ContentApp() {
             }
         };
 
-        chrome.storage?.onChanged?.addListener(handleStorageChange);
-        return () => chrome.storage?.onChanged?.removeListener(handleStorageChange);
+        try {
+            if (!chrome.runtime?.id) throw new Error("Extension context invalidated");
+            chrome.storage?.sync?.get(['enabled'], (result) => {
+                if (chrome.runtime?.lastError) return;
+                if (result.enabled !== undefined) setIsEnabled(result.enabled);
+            });
+            chrome.storage?.onChanged?.addListener(handleStorageChange);
+        } catch (e) {
+            console.debug("Grammarly Clone context invalidated", e);
+        }
+
+        return () => {
+            try {
+                if (chrome.runtime?.id) {
+                    chrome.storage?.onChanged?.removeListener(handleStorageChange);
+                }
+            } catch (e) {
+                // Ignore context invalidated
+            }
+        };
     }, []);
 
     const updatePosition = () => {
@@ -153,16 +167,28 @@ export default function ContentApp() {
             return;
         }
 
-        setStatus('loading');
-        chrome.runtime?.sendMessage({ action: 'checkGrammar', text }, (response) => {
-            if (response && response.success) {
-                const resultMatches = response.data.matches;
-                setMatches(resultMatches);
-                setStatus(resultMatches.length > 0 ? 'error' : 'idle');
-            } else {
-                setStatus('idle');
-            }
-        });
+        try {
+            if (!chrome.runtime?.id) throw new Error("Extension context invalidated");
+
+            setStatus('loading');
+            chrome.runtime?.sendMessage({ action: 'checkGrammar', text }, (response) => {
+                if (chrome.runtime?.lastError) {
+                    console.debug("Grammarly Clone checkGrammar error:", chrome.runtime.lastError);
+                    setStatus('idle');
+                    return;
+                }
+                if (response && response.success) {
+                    const resultMatches = response.data?.matches || [];
+                    setMatches(resultMatches);
+                    setStatus(resultMatches.length > 0 ? 'error' : 'idle');
+                } else {
+                    setStatus('idle');
+                }
+            });
+        } catch (e) {
+            console.debug("Grammarly Clone context invalidated", e);
+            setStatus('idle');
+        }
     };
 
     const applyReplacement = (match: Match, replacementValue: string) => {
