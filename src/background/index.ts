@@ -17,7 +17,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
             },
-            body: `text=${encodeURIComponent(text)}&language=en-US&level=picky`
+            body: `text=${encodeURIComponent(text)}&language=en-US&level=picky&enabledCategories=SEMANTICS,STYLE,CLARITY,REDUNDANCY,CONFUSED_WORDS`
         })
             .then(response => {
                 if (!response.ok) {
