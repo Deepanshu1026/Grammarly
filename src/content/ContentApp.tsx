@@ -351,7 +351,11 @@ export default function ContentApp() {
                 {status === 'loading' && <Loader2 className="gc-icon-spin" />}
                 {status === 'error' && (
                     <>
-                        <div className="gc-logo-icon gc-logo-icon-error">G</div>
+                        <img
+                            src={chrome.runtime.getURL("logo/Grammerly logo.png")}
+                            alt="Grammarly Clone Error"
+                            className="gc-logo-img"
+                        />
                         <div className="gc-badge">
                             {matches.length > 99 ? '99+' : matches.length}
                         </div>

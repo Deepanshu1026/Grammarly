@@ -26,5 +26,15 @@
   "action": {
     "default_popup": "src/popup/index.html",
     "default_title": "Grammar Checker"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "logo/logo.png"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ]
 }

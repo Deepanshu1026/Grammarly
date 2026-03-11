@@ -62,14 +62,10 @@
 }
 
 /* logo */
-.gc-logo-icon {
-    font-size: 20px;
-    font-weight: 800;
-    color: #11a683;
-}
-
-.gc-logo-icon-error {
-    color: #e84d44;
+.gc-logo-img {
+    width: 24px;
+    height: 24px;
+    object-fit: contain;
 }
 
 /* --------------------------------
