@@ -295,7 +295,44 @@ export default function ContentApp() {
         setTimeout(() => checkText(activeTarget), 50);
     };
 
-    if (!isEnabled || !activeTarget) return null;
+    const getPopoverStyle = (): React.CSSProperties => {
+        const style: React.CSSProperties = {};
+        const popoverWidth = 360;
+        const popoverMaxHeight = 480;
+        const padding = 20;
+
+        const spaceBelow = window.innerHeight - position.top - 38;
+        const spaceAbove = position.top;
+        const spaceLeft = position.left + 38;
+        const spaceRight = window.innerWidth - position.left;
+
+        // Vertical placement: default to below to avoid overlapping text
+        if (spaceBelow > popoverMaxHeight + padding || spaceBelow > spaceAbove) {
+            style.top = '52px';
+            style.bottom = 'auto';
+            style.maxHeight = Math.min(popoverMaxHeight, Math.max(spaceBelow - padding, 200)) + 'px';
+        } else {
+            style.bottom = '52px';
+            style.top = 'auto';
+            style.maxHeight = Math.min(popoverMaxHeight, Math.max(spaceAbove - padding, 200)) + 'px';
+        }
+
+        // Horizontal placement: ensure it stays on screen
+        if (spaceLeft > popoverWidth + padding) {
+            style.right = '0px';
+            style.left = 'auto';
+        } else if (spaceRight > popoverWidth + padding) {
+            style.left = '0px';
+            style.right = 'auto';
+        } else {
+            style.right = '0px';
+            style.left = 'auto';
+        }
+
+        return style;
+    };
+
+    if (!isEnabled || !activeTarget || status === 'idle') return null;
 
     return (
         <div
@@ -312,7 +349,6 @@ export default function ContentApp() {
                 className={`gc-widget-btn ${status === 'error' ? 'gc-widget-btn-error' : ''}`}
             >
                 {status === 'loading' && <Loader2 className="gc-icon-spin" />}
-                {status === 'idle' && <div className="gc-logo-icon">G</div>}
                 {status === 'error' && (
                     <>
                         <div className="gc-logo-icon gc-logo-icon-error">G</div>
@@ -324,7 +360,7 @@ export default function ContentApp() {
             </button>
 
             {showPopover && matches.length > 0 && (
-                <div className="gc-popover">
+                <div className="gc-popover" style={getPopoverStyle()}>
                     <div className="gc-popover-header">
                         <span className="gc-popover-title">Suggestions</span>
                         <div className="gc-popover-count-pill">{matches.length}</div>

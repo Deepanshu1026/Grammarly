@@ -17,7 +17,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
             },
-            body: `text=${encodeURIComponent(text)}&language=en-US`
+            body: `text=${encodeURIComponent(text)}&language=en-US&level=picky`
         })
             .then(response => {
                 if (!response.ok) {
@@ -26,6 +26,20 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
                 return response.json();
             })
             .then(data => {
+                // Filter out capitalization errors
+                if (data && data.matches) {
+                    data.matches = data.matches.filter((m: any) => {
+                        const ruleId = m.rule?.id || '';
+                        const msg = (m.message || '').toLowerCase();
+
+                        // Ignore uppercase sentence start rule or any message mentioning it
+                        if (ruleId === 'UPPERCASE_SENTENCE_START' || msg.includes('uppercase letter') || msg.includes('capital letter')) {
+                            return false;
+                        }
+
+                        return true;
+                    });
+                }
                 sendResponse({ success: true, data: data });
             })
             .catch(error => {
