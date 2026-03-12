@@ -86,7 +86,7 @@ export const refineText = async (text: string) => {
                 messages: [
                     {
                         role: 'system',
-                        content: 'You are a professional editor. If the input is a sentence fragment, complete it or make it more professional. If it has grammar/spelling issues, fix them. If the text is already a perfect, complete, and professional sentence, return it exactly as is. Return ONLY the refined text.'
+                        content: 'You are a professional multilingual editor expert in English and Hinglish (Roman Hindi). Correct spelling (like "lettor" to "letter"), grammar, and refine sentence structure in both languages. If the input is in Hinglish, ensure the grammar is natural (e.g., "meeting kaisi thi" instead of "kaisa tha"). If the text is already perfect, return it exactly as is. Return ONLY the final text.'
                     },
                     {
                         role: 'user',

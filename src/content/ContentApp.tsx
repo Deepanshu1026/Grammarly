@@ -394,25 +394,43 @@ export default function ContentApp() {
                 )}
             </button>
 
-            {showPopover && proposedText && (
+            {showPopover && (
                 <div className="gc-popover" style={getPopoverStyle()}>
-                    <div className="gc-popover-header" style={{ paddingBottom: '12px' }}>
-                        <span className="gc-popover-title">Errors Found</span>
+                    <div className="gc-popover-header">
+                        <span className="gc-popover-title">AI Assistant</span>
+                        <button onClick={() => setShowPopover(false)} className="gc-close-x">×</button>
                     </div>
 
-                    <div className="gc-popover-body" style={{ padding: '0 16px 16px 16px' }}>
-                        <button
-                            className="gc-replace-btn"
-                            style={{ width: '100%', display: 'flex', justifyContent: 'center' }}
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                applyReplacement(0, proposedText.original.length, proposedText.fixed);
-                                setShowPopover(false);
-                                setProposedText(null);
-                            }}
-                        >
-                            Enhance & Fix All ✨
-                        </button>
+                    <div className="gc-popover-body">
+                        {status === 'error' && proposedText ? (
+                            <div className="gc-suggestion-card">
+                                <div className="gc-suggestion-label">Suggested Improvement:</div>
+                                <div className="gc-suggestion-text">"{proposedText.fixed}"</div>
+                                <button
+                                    className="gc-replace-btn"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        applyReplacement(0, proposedText.original.length, proposedText.fixed);
+                                        setShowPopover(false);
+                                    }}
+                                >
+                                    Apply Changes ✨
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="gc-idle-state">
+                                <p>No errors detected, but I can polish your text.</p>
+                                <button
+                                    className="gc-manual-refine-btn"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (activeTarget) checkText(activeTarget);
+                                    }}
+                                >
+                                    Force Refine / Polish ✨
+                                </button>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
