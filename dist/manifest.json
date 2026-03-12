@@ -7,7 +7,7 @@
     "storage"
   ],
   "host_permissions": [
-    "https://api.languagetool.org/*"
+    "https://api.sarvam.ai/*"
   ],
   "background": {
     "service_worker": "assets/background.js"

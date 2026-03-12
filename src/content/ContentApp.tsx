@@ -1,25 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
-import { Loader2, AlertCircle } from 'lucide-react';
-
-interface Match {
-    message: string;
-    offset: number;
-    length: number;
-    context: { text: string; offset: number; length: number };
-    sentenceOffset?: number;
-    sentenceLength?: number;
-    sentenceRewrite?: string;
-    replacements: { value: string }[];
-}
+import { Loader2 } from 'lucide-react';
 
 export default function ContentApp() {
     const [isEnabled, setIsEnabled] = useState(true);
     const [activeTarget, setActiveTarget] = useState<HTMLElement | null>(null);
     const [position, setPosition] = useState({ top: 0, left: 0 });
     const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
-    const [matches, setMatches] = useState<Match[]>([]);
+    const [proposedText, setProposedText] = useState<{ original: string; fixed: string } | null>(null);
     const [showPopover, setShowPopover] = useState(false);
-
     const checkTimeoutRef = useRef<number | null>(null);
     const widgetRef = useRef<HTMLDivElement>(null);
 
@@ -95,7 +83,6 @@ export default function ContentApp() {
             if (isEligibleInput(target)) {
                 setActiveTarget(target);
                 setTimeout(() => updatePosition(), 10);
-                setShowPopover(true);
                 checkText(target);
             }
         };
@@ -122,7 +109,6 @@ export default function ContentApp() {
                     document.activeElement !== shadowHost
                 ) {
                     setActiveTarget(null);
-                    setShowPopover(false);
                 }
             }, 50);
         };
@@ -132,15 +118,13 @@ export default function ContentApp() {
             const shadowHost = document.getElementById('grammarly-clone-host');
 
             if (e.target === activeTarget) {
-                setShowPopover(true);
+                // Do nothing
             } else if (
                 !isInsideWidget &&
                 e.target !== activeTarget &&
                 e.target !== shadowHost
             ) {
                 // Keep active target if they just clicked somewhere else on the page but not an input
-                setShowPopover(false);
-
                 // If they clicked something that isn't our target, clear it
                 if (!(e.target instanceof HTMLElement && isEligibleInput(e.target))) {
                     setActiveTarget(null);
@@ -171,7 +155,6 @@ export default function ContentApp() {
 
         if (!text || text.trim() === '') {
             setStatus('idle');
-            setMatches([]);
             return;
         }
 
@@ -181,17 +164,63 @@ export default function ContentApp() {
             setStatus('loading');
             chrome.runtime?.sendMessage({ action: 'checkGrammar', text }, (response) => {
                 if (chrome.runtime?.lastError) {
-                    console.debug("Grammarly Clone checkGrammar error:", chrome.runtime.lastError);
+                    console.error("[Grammarly Clone] Runtime Error:", chrome.runtime.lastError);
                     setStatus('idle');
                     return;
                 }
+
+                console.log("[Grammarly Clone] Response received:", response);
+
                 if (response && response.success) {
                     const resultMatches = response.data?.matches || [];
-                    setMatches(resultMatches);
                     const hasErrors = resultMatches.length > 0;
-                    setStatus(hasErrors ? 'error' : 'idle');
-                    if (hasErrors) setShowPopover(true);
+
+                    if (hasErrors && activeTarget) {
+                        // ... existing replacement logic ...
+                        let activeText = "";
+                        if (activeTarget.tagName === 'INPUT' || activeTarget.tagName === 'TEXTAREA') {
+                            activeText = (activeTarget as HTMLInputElement | HTMLTextAreaElement).value;
+                        } else if (activeTarget.isContentEditable || activeTarget.contentEditable === 'true') {
+                            activeText = activeTarget.innerText || activeTarget.textContent || "";
+                        }
+
+                        if (activeText === text) {
+                            let newText = text;
+                            const filteredMatches = [];
+                            let lastEnd = text.length + 1;
+                            for (const match of [...resultMatches].reverse()) {
+                                if (match.offset + match.length <= lastEnd) {
+                                    filteredMatches.push(match);
+                                    lastEnd = match.offset;
+                                }
+                            }
+                            let hasReplacement = false;
+                            for (const match of filteredMatches) {
+                                const repValue = match.replacements?.length > 0 ? match.replacements[0].value : null;
+                                if (repValue && !repValue.includes("Consider rewriting")) {
+                                    newText = newText.substring(0, match.offset) + repValue + newText.substring(match.offset + match.length);
+                                    hasReplacement = true;
+                                }
+                            }
+
+                            if (hasReplacement && newText !== text) {
+                                console.log("[Grammarly Clone] Showing popover with improvements");
+                                setProposedText({ original: text, fixed: newText });
+                                setShowPopover(true);
+                                setStatus('error');
+                            } else {
+                                console.log("[Grammarly Clone] No significant improvements suggested");
+                                setStatus('idle');
+                            }
+                        } else {
+                            setStatus('idle');
+                        }
+                    } else {
+                        console.log("[Grammarly Clone] No errors found in text");
+                        setStatus('idle');
+                    }
                 } else {
+                    console.error("[Grammarly Clone] API Error:", response?.error || "Unknown Error");
                     setStatus('idle');
                 }
             });
@@ -304,8 +333,8 @@ export default function ContentApp() {
 
     const getPopoverStyle = (): React.CSSProperties => {
         const style: React.CSSProperties = {};
-        const popoverWidth = 360;
-        const popoverMaxHeight = 480;
+        const popoverWidth = 260; // smaller popover
+        const popoverMaxHeight = 200;
         const padding = 20;
 
         const spaceBelow = window.innerHeight - position.top - 38;
@@ -313,7 +342,6 @@ export default function ContentApp() {
         const spaceLeft = position.left + 38;
         const spaceRight = window.innerWidth - position.left;
 
-        // Vertical placement: default to below to avoid overlapping text
         if (spaceBelow > popoverMaxHeight + padding || spaceBelow > spaceAbove) {
             style.top = '52px';
             style.bottom = 'auto';
@@ -324,7 +352,6 @@ export default function ContentApp() {
             style.maxHeight = Math.min(popoverMaxHeight, Math.max(spaceAbove - padding, 200)) + 'px';
         }
 
-        // Horizontal placement: ensure it stays on screen
         if (spaceLeft > popoverWidth + padding) {
             style.right = '0px';
             style.left = 'auto';
@@ -339,96 +366,53 @@ export default function ContentApp() {
         return style;
     };
 
-    if (!isEnabled || !activeTarget || status === 'idle') return null;
+    if (!isEnabled || !activeTarget) return null;
 
     return (
         <div
             ref={widgetRef}
             id="grammarly-clone-root"
             onMouseDown={(e) => {
-                // CRITICAL FIX: Prevent focus stealing
                 e.preventDefault();
             }}
             style={{ position: 'absolute', top: position.top, left: position.left }}
         >
             <button
-                onClick={() => matches.length > 0 && setShowPopover(!showPopover)}
-                className={`gc-widget-btn ${status === 'error' ? 'gc-widget-btn-error' : ''}`}
+                onClick={() => {
+                    if (status === 'error') setShowPopover(!showPopover);
+                }}
+                className={`gc-widget-btn ${status === 'error' ? 'gc-widget-btn-error' : status === 'idle' ? 'gc-widget-btn-success' : ''}`}
             >
                 {status === 'loading' && <Loader2 className="gc-icon-spin" />}
-                {status === 'error' && (
-                    <>
-                        <img
-                            src={chrome.runtime.getURL("logo/logo.png")}
-                            alt="Grammarly Clone Error"
-                            className="gc-logo-img"
-                        />
-                        <div className="gc-badge">
-                            {matches.length > 99 ? '99+' : matches.length}
-                        </div>
-                    </>
+                {(status === 'error' || status === 'idle') && (
+                    <img
+                        src={chrome.runtime.getURL("logo/logo.png")}
+                        alt="Grammarly Clone"
+                        className="gc-logo-img"
+                        style={{ filter: status === 'idle' ? 'grayscale(0) brightness(1)' : 'none' }}
+                    />
                 )}
             </button>
 
-            {showPopover && matches.length > 0 && (
+            {showPopover && proposedText && (
                 <div className="gc-popover" style={getPopoverStyle()}>
-                    <div className="gc-popover-header">
-                        <span className="gc-popover-title">Suggestions</span>
-                        <div className="gc-popover-count-pill">{matches.length}</div>
+                    <div className="gc-popover-header" style={{ paddingBottom: '12px' }}>
+                        <span className="gc-popover-title">Errors Found</span>
                     </div>
 
-                    <div className="gc-popover-body">
-                        {matches.map((match, idx) => {
-                            const start = match.context.text.substring(0, match.context.offset);
-                            const errorWord = match.context.text.substring(match.context.offset, match.context.offset + match.context.length);
-                            const end = match.context.text.substring(match.context.offset + match.context.length);
-
-                            return (
-                                <div key={idx} className="gc-match-card">
-                                    <div className="gc-match-header">
-                                        <div className="gc-icon-wrapper">
-                                            <AlertCircle className="gc-match-icon" />
-                                        </div>
-                                        <span className="gc-match-title">{match.message}</span>
-                                    </div>
-
-                                    <div className="gc-match-context">
-                                        ...{start}<span className="gc-error-word">{errorWord}</span>{end}...
-                                    </div>
-
-                                    <div className="gc-replacements">
-                                        {match.replacements.length > 0 && match.replacements.slice(0, 1).map((r, i) => (
-                                            <button
-                                                key={`word-${i}`}
-                                                className="gc-replace-btn"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    applyReplacement(match.offset, match.offset + match.length, r.value);
-                                                }}
-                                            >
-                                                Fix Word: {r.value}
-                                            </button>
-                                        ))}
-
-                                        {match.sentenceRewrite && (
-                                            <button
-                                                className="gc-replace-btn gc-replace-sentence-btn"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    applyReplacement(
-                                                        match.sentenceOffset ?? 0,
-                                                        (match.sentenceOffset ?? 0) + (match.sentenceLength ?? 0),
-                                                        match.sentenceRewrite!
-                                                    );
-                                                }}
-                                            >
-                                                Rewrite Sentence
-                                            </button>
-                                        )}
-                                    </div>
-                                </div>
-                            );
-                        })}
+                    <div className="gc-popover-body" style={{ padding: '0 16px 16px 16px' }}>
+                        <button
+                            className="gc-replace-btn"
+                            style={{ width: '100%', display: 'flex', justifyContent: 'center' }}
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                applyReplacement(0, proposedText.original.length, proposedText.fixed);
+                                setShowPopover(false);
+                                setProposedText(null);
+                            }}
+                        >
+                            Enhance & Fix All ✨
+                        </button>
                     </div>
                 </div>
             )}

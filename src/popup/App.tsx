@@ -46,7 +46,7 @@ function App() {
             </div>
 
             <div className="popup-footer">
-                Powered by LanguageTool API • Built with Vite & React
+                Powered by Sarvam AI • Built with Vite & React
             </div>
         </div>
     );
