@@ -29,8 +29,8 @@ export default function ContentApp() {
                 if (result.enabled !== undefined) setIsEnabled(result.enabled);
             });
             chrome.storage?.onChanged?.addListener(handleStorageChange);
-        } catch (e) {
-            console.debug("Grammarly Clone context invalidated", e);
+        } catch (err) {
+            console.debug("Grammarly Clone context invalidated", err);
         }
 
         return () => {
@@ -38,8 +38,8 @@ export default function ContentApp() {
                 if (chrome.runtime?.id) {
                     chrome.storage?.onChanged?.removeListener(handleStorageChange);
                 }
-            } catch (e) {
-                // Ignore context invalidated
+            } catch (err) {
+                // Ignore context
             }
         };
     }, []);
@@ -47,7 +47,6 @@ export default function ContentApp() {
     const updatePosition = () => {
         if (activeTarget) {
             const rect = activeTarget.getBoundingClientRect();
-            // Since host is 'fixed', client rect matches perfectly without scroll offset
             setPosition({
                 top: rect.bottom - 45,
                 left: rect.right - 45
@@ -93,7 +92,6 @@ export default function ContentApp() {
                 if (checkTimeoutRef.current) window.clearTimeout(checkTimeoutRef.current);
                 setStatus('loading');
                 setShowPopover(false);
-
                 checkTimeoutRef.current = window.setTimeout(() => {
                     if (activeTarget) checkText(activeTarget);
                 }, 1000);
@@ -101,13 +99,9 @@ export default function ContentApp() {
         };
 
         const handleBlur = () => {
-            // Need a tiny timeout to see where focus actually went
             setTimeout(() => {
                 const shadowHost = document.getElementById('grammarly-clone-host');
-                if (
-                    document.activeElement !== activeTarget &&
-                    document.activeElement !== shadowHost
-                ) {
+                if (document.activeElement !== activeTarget && document.activeElement !== shadowHost) {
                     setActiveTarget(null);
                 }
             }, 50);
@@ -116,16 +110,7 @@ export default function ContentApp() {
         const handleClickOutside = (e: MouseEvent) => {
             const isInsideWidget = widgetRef.current && e.composedPath().includes(widgetRef.current);
             const shadowHost = document.getElementById('grammarly-clone-host');
-
-            if (e.target === activeTarget) {
-                // Do nothing
-            } else if (
-                !isInsideWidget &&
-                e.target !== activeTarget &&
-                e.target !== shadowHost
-            ) {
-                // Keep active target if they just clicked somewhere else on the page but not an input
-                // If they clicked something that isn't our target, clear it
+            if (e.target !== activeTarget && !isInsideWidget && e.target !== shadowHost) {
                 if (!(e.target instanceof HTMLElement && isEligibleInput(e.target))) {
                     setActiveTarget(null);
                 }
@@ -160,7 +145,6 @@ export default function ContentApp() {
 
         try {
             if (!chrome.runtime?.id) {
-                console.log("[Grammarly Clone] Context invalidated. Please refresh the page.");
                 setStatus('idle');
                 return;
             }
@@ -168,19 +152,13 @@ export default function ContentApp() {
             setStatus('loading');
             chrome.runtime.sendMessage({ action: 'checkGrammar', text }, (response) => {
                 if (chrome.runtime?.lastError) {
-                    console.debug("[Grammarly Clone] Runtime Error (likely invalidated):", chrome.runtime.lastError.message);
                     setStatus('idle');
                     return;
                 }
 
-                console.log("[Grammarly Clone] Response received:", response);
-
                 if (response && response.success) {
                     const resultMatches = response.data?.matches || [];
-                    const hasErrors = resultMatches.length > 0;
-
-                    if (hasErrors && activeTarget) {
-                        // ... existing replacement logic ...
+                    if (resultMatches.length > 0 && activeTarget) {
                         let activeText = "";
                         if (activeTarget.tagName === 'INPUT' || activeTarget.tagName === 'TEXTAREA') {
                             activeText = (activeTarget as HTMLInputElement | HTMLTextAreaElement).value;
@@ -208,77 +186,43 @@ export default function ContentApp() {
                             }
 
                             if (hasReplacement && newText !== text) {
-                                console.log("[Grammarly Clone] Showing popover with improvements");
                                 setProposedText({ original: text, fixed: newText });
-                                setShowPopover(true);
                                 setStatus('error');
                             } else {
-                                console.log("[Grammarly Clone] No significant improvements suggested");
+                                setProposedText(null);
                                 setStatus('idle');
                             }
                         } else {
                             setStatus('idle');
                         }
                     } else {
-                        console.log("[Grammarly Clone] No errors found in text");
+                        setProposedText(null);
                         setStatus('idle');
                     }
                 } else {
-                    console.error("[Grammarly Clone] API Error:", response?.error || "Unknown Error");
                     setStatus('idle');
                 }
             });
-        } catch (e) {
-            console.debug("Grammarly Clone context invalidated", e);
+        } catch (err) {
             setStatus('idle');
         }
     };
 
     const applyReplacement = (startPos: number, endPos: number, replacementValue: string) => {
         if (!activeTarget) return;
-
         setStatus('loading');
 
         try {
             if (activeTarget.tagName === 'INPUT' || activeTarget.tagName === 'TEXTAREA') {
                 const el = activeTarget as HTMLInputElement | HTMLTextAreaElement;
-
                 el.focus();
                 el.setSelectionRange(startPos, endPos);
-                // Safe insertion: works for React Inputs by updating natively
                 document.execCommand('insertText', false, replacementValue);
-
-                // Fallback for some non-standard inputs just in case execCommand didn't work
-                if (el.value.substring(startPos, startPos + replacementValue.length) !== replacementValue) {
-                    const currentText = el.value;
-                    const newText = currentText.substring(0, startPos) + replacementValue + currentText.substring(endPos);
-
-                    // React 15/16/17 setter hack
-                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
-                    const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
-
-                    if (activeTarget.tagName === 'INPUT' && nativeInputValueSetter) {
-                        nativeInputValueSetter.call(el, newText);
-                    } else if (activeTarget.tagName === 'TEXTAREA' && nativeTextAreaValueSetter) {
-                        nativeTextAreaValueSetter.call(el, newText);
-                    } else {
-                        el.value = newText;
-                    }
-                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                }
             } else if (activeTarget.isContentEditable || activeTarget.contentEditable === 'true') {
                 activeTarget.focus();
-
-                // Select the text carefully inside the ContentEditable 
-                // avoiding destroying framework DOMs (React, Vue, Facebook, WhatsApp web, etc.)
                 const selection = window.getSelection();
                 if (selection && selection.rangeCount > 0) {
-                    // Try our best to select the exact string index
                     const range = document.createRange();
-
-                    // A proper implementation would traverse text nodes here to find the exact DOM node matches for match.context.offset.
-                    // For simplicity and safety in a clone, we command 'selectAll' and replace if small, but let's just attempt 
-                    // a basic select-and-replace algorithm via execCommand if possible, or gracefully degrade.
                     try {
                         let currentOffset = 0;
                         let startNode: Node | null = null;
@@ -305,7 +249,6 @@ export default function ContentApp() {
                                 }
                             }
                         };
-
                         walkNodes(activeTarget);
 
                         if (startNode && endNode) {
@@ -313,126 +256,72 @@ export default function ContentApp() {
                             range.setEnd(endNode, endNodeOffset);
                             selection.removeAllRanges();
                             selection.addRange(range);
-
-                            // Let the browser handle standard text replacing
                             document.execCommand('insertText', false, replacementValue);
                         } else {
-                            // Fallback that might break React (only if tree walker fails)
-                            const currentInner = activeTarget.innerText;
-                            activeTarget.innerText = currentInner.substring(0, startPos) + replacementValue + currentInner.substring(endPos);
-                            activeTarget.dispatchEvent(new Event('input', { bubbles: true }));
+                            activeTarget.innerText = activeTarget.innerText.substring(0, startPos) + replacementValue + activeTarget.innerText.substring(endPos);
                         }
-                    } catch (e) {
+                    } catch (err) {
                         document.execCommand('insertText', false, replacementValue);
                     }
                 }
             }
-        } catch (e) {
-            console.error("Grammarly Clone Error replacing text:", e);
+        } catch (err) {
+            console.error("Replacement Error:", err);
         }
 
-        // Re-check after a brief timeout to let React/site update the UI
-        setTimeout(() => checkText(activeTarget), 50);
+        setProposedText(null);
+        setStatus('idle');
+        setShowPopover(false);
+        setTimeout(() => { if (activeTarget) checkText(activeTarget); }, 300);
     };
 
     const getPopoverStyle = (): React.CSSProperties => {
         const style: React.CSSProperties = {};
-        const popoverWidth = 260; // smaller popover
-        const popoverMaxHeight = 200;
+        const popoverMaxHeight = 300;
         const padding = 20;
-
         const spaceBelow = window.innerHeight - position.top - 38;
         const spaceAbove = position.top;
-        const spaceLeft = position.left + 38;
-        const spaceRight = window.innerWidth - position.left;
 
         if (spaceBelow > popoverMaxHeight + padding || spaceBelow > spaceAbove) {
             style.top = '52px';
             style.bottom = 'auto';
-            style.maxHeight = Math.min(popoverMaxHeight, Math.max(spaceBelow - padding, 200)) + 'px';
         } else {
             style.bottom = '52px';
             style.top = 'auto';
-            style.maxHeight = Math.min(popoverMaxHeight, Math.max(spaceAbove - padding, 200)) + 'px';
         }
-
-        if (spaceLeft > popoverWidth + padding) {
-            style.right = '0px';
-            style.left = 'auto';
-        } else if (spaceRight > popoverWidth + padding) {
-            style.left = '0px';
-            style.right = 'auto';
-        } else {
-            style.right = '0px';
-            style.left = 'auto';
-        }
-
+        style.right = '0px';
+        style.left = 'auto';
         return style;
     };
 
     if (!isEnabled || !activeTarget) return null;
 
     return (
-        <div
-            ref={widgetRef}
-            id="grammarly-clone-root"
-            onMouseDown={(e) => {
-                e.preventDefault();
-            }}
-            style={{ position: 'absolute', top: position.top, left: position.left }}
-        >
+        <div ref={widgetRef} id="grammarly-clone-root" onMouseDown={(e) => e.preventDefault()} style={{ position: 'absolute', top: position.top, left: position.left }}>
             <button
-                onClick={() => {
-                    if (status === 'error') setShowPopover(!showPopover);
-                }}
-                className={`gc-widget-btn ${status === 'error' ? 'gc-widget-btn-error' : status === 'idle' ? 'gc-widget-btn-success' : ''}`}
+                onClick={() => { if (status === 'error') setShowPopover(!showPopover); }}
+                className={`gc-widget-btn ${status === 'error' ? 'gc-widget-btn-error' : 'gc-widget-btn-success'}`}
             >
-                {status === 'loading' && <Loader2 className="gc-icon-spin" />}
-                {(status === 'error' || status === 'idle') && (
-                    <img
-                        src={chrome.runtime.getURL("logo/logo.png")}
-                        alt="Grammarly Clone"
-                        className="gc-logo-img"
-                        style={{ filter: status === 'idle' ? 'grayscale(0) brightness(1)' : 'none' }}
-                    />
-                )}
+                {status === 'loading' ? <Loader2 className="gc-icon-spin" /> : <img src={chrome.runtime.getURL("logo/logo.png")} alt="Logo" className="gc-logo-img" />}
             </button>
 
             {showPopover && (
                 <div className="gc-popover" style={getPopoverStyle()}>
                     <div className="gc-popover-header">
-                        <span className="gc-popover-title">AI Assistant</span>
+                        <span className="gc-popover-title">AI Editor</span>
                         <button onClick={() => setShowPopover(false)} className="gc-close-x">×</button>
                     </div>
-
                     <div className="gc-popover-body">
                         {status === 'error' && proposedText ? (
                             <div className="gc-suggestion-card">
                                 <div className="gc-suggestion-label">Suggested Improvement:</div>
                                 <div className="gc-suggestion-text">"{proposedText.fixed}"</div>
-                                <button
-                                    className="gc-replace-btn"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        applyReplacement(0, proposedText.original.length, proposedText.fixed);
-                                        setShowPopover(false);
-                                    }}
-                                >
-                                    Apply Changes ✨
-                                </button>
+                                <button className="gc-replace-btn" onClick={(ev) => { ev.stopPropagation(); applyReplacement(0, proposedText.original.length, proposedText.fixed); }}>Apply Changes ✨</button>
                             </div>
                         ) : (
                             <div className="gc-idle-state">
                                 <p>No errors detected, but I can polish your text.</p>
-                                <button
-                                    className="gc-manual-refine-btn"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (activeTarget) checkText(activeTarget);
-                                    }}
-                                >
-                                    Force Refine / Polish ✨
-                                </button>
+                                <button className="gc-manual-refine-btn" onClick={(ev) => { ev.stopPropagation(); if (activeTarget) checkText(activeTarget); }}>Force Refine / Polish ✨</button>
                             </div>
                         )}
                     </div>
