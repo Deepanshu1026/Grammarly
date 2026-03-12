@@ -159,12 +159,16 @@ export default function ContentApp() {
         }
 
         try {
-            if (!chrome.runtime?.id) throw new Error("Extension context invalidated");
+            if (!chrome.runtime?.id) {
+                console.log("[Grammarly Clone] Context invalidated. Please refresh the page.");
+                setStatus('idle');
+                return;
+            }
 
             setStatus('loading');
-            chrome.runtime?.sendMessage({ action: 'checkGrammar', text }, (response) => {
+            chrome.runtime.sendMessage({ action: 'checkGrammar', text }, (response) => {
                 if (chrome.runtime?.lastError) {
-                    console.error("[Grammarly Clone] Runtime Error:", chrome.runtime.lastError);
+                    console.debug("[Grammarly Clone] Runtime Error (likely invalidated):", chrome.runtime.lastError.message);
                     setStatus('idle');
                     return;
                 }
