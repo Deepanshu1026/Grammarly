@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Mic, MicOff } from 'lucide-react';
 
 export default function ContentApp() {
     const [isEnabled, setIsEnabled] = useState(true);
@@ -8,8 +8,10 @@ export default function ContentApp() {
     const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
     const [proposedText, setProposedText] = useState<{ original: string; fixed: string } | null>(null);
     const [showPopover, setShowPopover] = useState(false);
+    const [isRecording, setIsRecording] = useState(false);
     const checkTimeoutRef = useRef<number | null>(null);
     const widgetRef = useRef<HTMLDivElement>(null);
+    const recognitionRef = useRef<any>(null);
 
     useEffect(() => {
         const handleStorageChange = (changes: any, namespace: string) => {
@@ -275,6 +277,84 @@ export default function ContentApp() {
         setTimeout(() => { if (activeTarget) checkText(activeTarget); }, 300);
     };
 
+    const toggleRecording = () => {
+        if (isRecording) {
+            recognitionRef.current?.stop();
+            setIsRecording(false);
+            return;
+        }
+
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            alert("Speech recognition is not supported in this browser.");
+            return;
+        }
+
+        if (!recognitionRef.current) {
+            const recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+
+            recognition.onresult = (event: any) => {
+                let interimTranscript = '';
+                let finalTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript;
+                    } else {
+                        interimTranscript += event.results[i][0].transcript;
+                    }
+                }
+
+                if (finalTranscript && activeTarget) {
+                    insertTextAtCursor(finalTranscript);
+                }
+            };
+
+            recognition.onerror = (event: any) => {
+                console.error('Speech recognition error:', event.error);
+                setIsRecording(false);
+            };
+
+            recognition.onend = () => {
+                setIsRecording(false);
+            };
+
+            recognitionRef.current = recognition;
+        }
+
+        try {
+            recognitionRef.current.start();
+            setIsRecording(true);
+        } catch (err) {
+            console.error("Failed to start recognition:", err);
+            setIsRecording(false);
+        }
+    };
+
+    const insertTextAtCursor = (text: string) => {
+        if (!activeTarget) return;
+
+        try {
+            if (activeTarget.tagName === 'INPUT' || activeTarget.tagName === 'TEXTAREA') {
+                const el = activeTarget as HTMLInputElement | HTMLTextAreaElement;
+                const start = el.selectionStart || 0;
+                const end = el.selectionEnd || 0;
+                const val = el.value;
+                el.value = val.substring(0, start) + text + val.substring(end);
+                el.selectionStart = el.selectionEnd = start + text.length;
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+            } else if (activeTarget.isContentEditable || activeTarget.contentEditable === 'true') {
+                activeTarget.focus();
+                document.execCommand('insertText', false, text);
+            }
+        } catch (err) {
+            console.error("Insert Text Error:", err);
+        }
+    };
+
     const getPopoverStyle = (): React.CSSProperties => {
         const style: React.CSSProperties = {};
         const popoverMaxHeight = 300;
@@ -297,12 +377,21 @@ export default function ContentApp() {
     if (!isEnabled || !activeTarget) return null;
 
     return (
-        <div ref={widgetRef} id="grammarly-clone-root" onMouseDown={(e) => e.preventDefault()} style={{ position: 'absolute', top: position.top, left: position.left }}>
+        <div ref={widgetRef} id="grammarly-clone-root" onMouseDown={(e) => e.preventDefault()} style={{ position: 'absolute', top: position.top, left: position.left, display: 'flex', gap: '8px', alignItems: 'center' }}>
             <button
                 onClick={() => { if (status === 'error') setShowPopover(!showPopover); }}
                 className={`gc-widget-btn ${status === 'error' ? 'gc-widget-btn-error' : 'gc-widget-btn-success'}`}
             >
                 {status === 'loading' ? <Loader2 className="gc-icon-spin" /> : <img src={chrome.runtime.getURL("logo/logo.png")} alt="Logo" className="gc-logo-img" />}
+            </button>
+
+            <button
+                onClick={(e) => { e.stopPropagation(); toggleRecording(); }}
+                className={`gc-widget-btn ${isRecording ? 'gc-mic-active' : ''}`}
+                style={{ width: '34px', height: '34px' }}
+                title="Voice Typing"
+            >
+                {isRecording ? <MicOff size={18} className="text-red-500" /> : <Mic size={18} />}
             </button>
 
             {showPopover && (
@@ -322,6 +411,16 @@ export default function ContentApp() {
                             <div className="gc-idle-state">
                                 <p>No errors detected, but I can polish your text.</p>
                                 <button className="gc-manual-refine-btn" onClick={(ev) => { ev.stopPropagation(); if (activeTarget) checkText(activeTarget); }}>Force Refine / Polish ✨</button>
+                                <div style={{ marginTop: '12px', borderTop: '1px solid #eee', paddingTop: '12px' }}>
+                                    <button
+                                        className={`gc-manual-refine-btn ${isRecording ? 'gc-mic-active' : ''}`}
+                                        onClick={(ev) => { ev.stopPropagation(); toggleRecording(); }}
+                                        style={{ backgroundColor: isRecording ? '#fee2e2' : 'white' }}
+                                    >
+                                        {isRecording ? <MicOff size={16} /> : <Mic size={16} />}
+                                        {isRecording ? 'Stop Recording' : 'Start Voice Typing'}
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </div>
